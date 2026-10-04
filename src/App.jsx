@@ -1,3 +1,4 @@
+
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
@@ -5,444 +6,390 @@ import { db } from './lib/db';
 import { exportSurveillanceToExcel } from './lib/reports';
 import { getPendingSyncCount, syncPendingVisits } from './lib/syncService';
 
-// โมดูล 2: เฝ้าระวังโรค
+import Login from './components/auth/Login';
+import Dashboard from './components/dashboard/Dashboard';
+import CaregiverDashboard from './components/caregiver/CaregiverDashboard';
+
+// โมดูลวิชาชีพ
 import SurveillanceForm from './components/surveillance/SurveillanceForm';
 import SurveillanceList from './components/surveillance/SurveillanceList';
 import SurveillanceSummary from './components/surveillance/SurveillanceSummary';
-
-// โมดูล 3: วางแผนครอบครัว
 import FamilyPlanningForm from './components/familyPlanning/FamilyPlanningForm';
 import FamilyPlanningList from './components/familyPlanning/FamilyPlanningList';
 import FamilyPlanningReport from './components/familyPlanning/FamilyPlanningReport';
-
-// โมดูล 4: งานส่งต่อ (Refer)
 import ReferForm from './components/refer/ReferForm';
 import ReferList from './components/refer/ReferList';
 import ReferReport from './components/refer/ReferReport';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('refer');
+  const [currentUser, setCurrentUser] = useState(null); // null = Guest
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [fpViewMode, setFpViewMode] = useState('list');
-  const [referViewMode, setReferViewMode] = useState('list'); // 'list' (รายการส่งต่อ) หรือ 'report' (สมุดทะเบียน)
+  const [referViewMode, setReferViewMode] = useState('list');
+
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // State เฝ้าระวังโรค
+  // States
   const [surveillanceCases, setSurveillanceCases] = useState([]);
-  const [loadingCases, setLoadingCases] = useState(true);
+  const [familyPlanningRecords, setFamilyPlanningRecords] = useState([]);
+  const [referRecords, setReferRecords] = useState([]);
+  const [loadingCases, setLoadingCases] = useState(false);
+  const [loadingFP, setLoadingFP] = useState(false);
+  const [loadingRefer, setLoadingRefer] = useState(false);
+
+  // Modals
   const [showSurveillanceModal, setShowSurveillanceModal] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null);
-
-  // State วางแผนครอบครัว
-  const [familyPlanningRecords, setFamilyPlanningRecords] = useState([]);
-  const [loadingFP, setLoadingFP] = useState(true);
   const [showFPModal, setShowFPModal] = useState(false);
-
-  // State ส่งต่อ Refer
-  const [referRecords, setReferRecords] = useState([]);
-  const [loadingRefer, setLoadingRefer] = useState(true);
   const [showReferModal, setShowReferModal] = useState(false);
 
-  // ดึงข้อมูลเฝ้าระวังโรค
+  // สิทธิ์ผู้ใช้งาน
+  const userRole = currentUser ? currentUser.role : isGuestMode ? 'guest' : null;
+  const isProfessional = ['nurse', 'public_health_officer', 'health_officer'].includes(userRole);
+  const isOsmOrCg = ['osm', 'caregiver'].includes(userRole);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('phc_local_user');
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    setCheckingAuth(false);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('phc_local_user');
+    setCurrentUser(null);
+    setIsGuestMode(false);
+    setActiveTab('dashboard');
+  };
+
+  // ดึงข้อมูล
   const fetchSurveillanceCases = async () => {
     setLoadingCases(true);
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase
-          .from('disease_surveillance')
-          .select('*')
-          .order('onset_date', { ascending: false });
-
-        if (!error && data) {
-          setSurveillanceCases(data);
-          await db.diseaseSurveillance.bulkPut(data);
-        }
+        const { data } = await supabase.from('disease_surveillance').select('*').order('onset_date', { ascending: false });
+        if (data) setSurveillanceCases(data);
       } else {
-        const localData = await db.diseaseSurveillance.toArray();
-        setSurveillanceCases(localData.reverse());
+        const local = await db.diseaseSurveillance.toArray();
+        setSurveillanceCases(local.reverse());
       }
-    } catch (err) {
-      console.error(err);
-      const fallback = await db.diseaseSurveillance.toArray();
-      setSurveillanceCases(fallback.reverse());
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoadingCases(false);
     }
   };
 
-  // ดึงข้อมูลวางแผนครอบครัว
   const fetchFamilyPlanningRecords = async () => {
     setLoadingFP(true);
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase
-          .from('family_planning')
-          .select('*')
-          .order('service_date', { ascending: false });
-
-        if (!error && data) {
-          setFamilyPlanningRecords(data);
-          await db.familyPlanning.bulkPut(data);
-        }
+        const { data } = await supabase.from('family_planning').select('*').order('service_date', { ascending: false });
+        if (data) setFamilyPlanningRecords(data);
       } else {
-        const localData = await db.familyPlanning.toArray();
-        setFamilyPlanningRecords(localData.reverse());
+        const local = await db.familyPlanning.toArray();
+        setFamilyPlanningRecords(local.reverse());
       }
-    } catch (err) {
-      console.error(err);
-      const fallback = await db.familyPlanning.toArray();
-      setFamilyPlanningRecords(fallback.reverse());
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoadingFP(false);
     }
   };
 
-  // ดึงข้อมูลการส่งต่อ Refer
   const fetchReferRecords = async () => {
     setLoadingRefer(true);
     try {
       if (navigator.onLine) {
-        const { data, error } = await supabase
-          .from('patient_refers')
-          .select('*')
-          .order('refer_date', { ascending: false });
-
-        if (!error && data) {
-          setReferRecords(data);
-          await db.patientRefers.bulkPut(data);
-        }
+        const { data } = await supabase.from('patient_refers').select('*').order('refer_date', { ascending: false });
+        if (data) setReferRecords(data);
       } else {
-        const localData = await db.patientRefers.toArray();
-        setReferRecords(localData.reverse());
+        const local = await db.patientRefers.toArray();
+        setReferRecords(local.reverse());
       }
-    } catch (err) {
-      console.error(err);
-      const fallback = await db.patientRefers.toArray();
-      setReferRecords(fallback.reverse());
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoadingRefer(false);
     }
   };
 
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      triggerSync();
-    };
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    updatePendingCount();
     fetchSurveillanceCases();
     fetchFamilyPlanningRecords();
     fetchReferRecords();
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
   }, []);
 
-  const updatePendingCount = async () => {
-    try {
-      const count = await getPendingSyncCount();
-      setPendingCount(count);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400 text-sm">
+        กำลังโหลดระบบบริการปฐมภูมิ รพ.สต.วังตะเคียน...
+      </div>
+    );
+  }
 
-  const triggerSync = async () => {
-    if (!navigator.onLine || isSyncing) return;
-    setIsSyncing(true);
-    try {
-      await syncPendingVisits();
-      await updatePendingCount();
-      await fetchSurveillanceCases();
-      await fetchFamilyPlanningRecords();
-      await fetchReferRecords();
-    } catch (err) {
-      console.error('ซิงก์ข้อมูลไม่สำเร็จ:', err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+  // หน้า Login เมื่อยังไม่ได้ล็อกอินและไม่ได้เลือก Guest Mode
+  if (!currentUser && !isGuestMode) {
+    return (
+      <Login
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          setIsGuestMode(false);
+          setActiveTab(user.role === 'osm' || user.role === 'caregiver' ? 'caregiver' : 'dashboard');
+        }}
+        onContinueAsGuest={() => {
+          setIsGuestMode(true);
+          setActiveTab('dashboard');
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 font-sans flex flex-col">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col">
       {/* Header */}
       <header className="bg-emerald-800 text-white shadow-md sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
-          <div>
-            <h1 className="text-lg sm:text-xl font-bold tracking-tight">
-              ระบบบริการสุขภาพปฐมภูมิ รพ.สต.วังตะเคียน
-            </h1>
-            <p className="text-xs text-emerald-200">
-              ต.วังตะเคียน อ.กบินทร์บุรี จ.ปราจีนบุรี
-            </p>
+        <div className="max-w-6xl mx-auto px-4 py-2.5 flex justify-between items-center gap-3">
+          <div onClick={() => setActiveTab('dashboard')} className="cursor-pointer flex items-center gap-2.5">
+            <img src="/logo.png" alt="โลโก้" className="w-8 h-8 object-contain" />
+            <div>
+              <h1 className="text-base font-bold leading-tight">รพ.สต.วังตะเคียน</h1>
+              <p className="text-[11px] text-emerald-200">
+                {currentUser ? `${currentUser.name} (${currentUser.position})` : 'มุมมองบุคคลทั่วไป (Guest)'}
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'
-                }`}
-              />
-              {isOnline ? 'Online' : 'Offline'}
-            </span>
-
-            <button
-              onClick={triggerSync}
-              disabled={isSyncing || !isOnline}
-              className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 transition"
-            >
-              <span>🔄</span> {isSyncing ? 'กำลังซิงก์...' : `ซิงก์ (${pendingCount})`}
-            </button>
+          <div className="flex items-center gap-2">
+            {currentUser ? (
+              <button
+                onClick={handleLogout}
+                className="bg-emerald-900/80 hover:bg-rose-600 text-white text-xs px-3 py-1.5 rounded-xl transition"
+              >
+                ออกจากระบบ
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsGuestMode(false)}
+                className="bg-white text-emerald-900 hover:bg-emerald-50 text-xs font-semibold px-3 py-1.5 rounded-xl transition shadow-sm"
+              >
+                เข้าสู่ระบบ
+              </button>
+            )}
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-4 py-6 flex-1 w-full space-y-6">
-        {/* เมนู 4 ด้าน */}
-        <section className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100">
-          <h2 className="text-base font-bold text-gray-700 mb-3">
-            งานบริการปฐมภูมิ 4 ด้าน
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <button className="p-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-center transition">
-              <span className="text-2xl block mb-1">🏠</span>
-              <span className="font-semibold text-emerald-900 text-sm block">1. เยี่ยมบ้าน</span>
-              <span className="text-xs text-gray-500">ADL & Vital Signs</span>
-            </button>
-
+      <main className="max-w-6xl mx-auto px-4 py-5 flex-1 w-full space-y-5">
+        {/* เมนูแท็บ: แสดงเฉพาะแท็บที่ผู้ใช้มีสิทธิ์เข้าถึง */}
+        <section className="bg-white p-2.5 rounded-2xl shadow-sm border border-slate-200">
+          <div className="flex flex-wrap gap-2 text-xs">
             <button
-              onClick={() => setActiveTab('surveillance')}
-              className={`p-4 rounded-xl text-center transition ${
-                activeTab === 'surveillance'
-                  ? 'bg-amber-100 border-2 border-amber-400 shadow-sm'
-                  : 'bg-amber-50 hover:bg-amber-100 border border-amber-200'
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-3 py-2 rounded-xl font-bold transition ${
+                activeTab === 'dashboard' ? 'bg-slate-800 text-white shadow' : 'bg-slate-100 text-slate-700'
               }`}
             >
-              <span className="text-2xl block mb-1">🚨</span>
-              <span className="font-semibold text-amber-900 text-sm block">2. เฝ้าระวังโรค</span>
-              <span className="text-xs text-amber-700 font-medium">ดูสถานการณ์</span>
+              📊 หน้าหลัก (Dashboard)
             </button>
 
-            <button
-              onClick={() => setActiveTab('familyPlanning')}
-              className={`p-4 rounded-xl text-center transition ${
-                activeTab === 'familyPlanning'
-                  ? 'bg-purple-100 border-2 border-purple-500 shadow-sm'
-                  : 'bg-purple-50 hover:bg-purple-100 border border-purple-200'
-              }`}
-            >
-              <span className="text-2xl block mb-1">💊</span>
-              <span className="font-semibold text-purple-900 text-sm block">3. วางแผนครอบครัว</span>
-              <span className="text-xs text-purple-700 font-medium">ยาคุม & รายงาน</span>
-            </button>
+            {/* อสม. / Caregiver แสดงเฉพาะแท็บเยี่ยมบ้านมอบหมาย */}
+            {isOsmOrCg && (
+              <button
+                onClick={() => setActiveTab('caregiver')}
+                className={`px-3 py-2 rounded-xl font-bold transition ${
+                  activeTab === 'caregiver' ? 'bg-teal-700 text-white shadow' : 'bg-teal-50 text-teal-900'
+                }`}
+              >
+                🤝 ผู้ป่วยที่ได้รับมอบหมาย
+              </button>
+            )}
 
-            <button
-              onClick={() => setActiveTab('refer')}
-              className={`p-4 rounded-xl text-center transition ${
-                activeTab === 'refer'
-                  ? 'bg-blue-100 border-2 border-blue-500 shadow-sm'
-                  : 'bg-blue-50 hover:bg-blue-100 border border-blue-200'
-              }`}
-            >
-              <span className="text-2xl block mb-1">🚑</span>
-              <span className="font-semibold text-blue-900 text-sm block">4. ส่งต่อ (Refer)</span>
-              <span className="text-xs text-blue-700 font-medium">รพ.กบินทร์บุรี</span>
-            </button>
+            {/* วิชาชีพ (พยาบาล/สธ.) เข้าถึงได้ทั้ง 4 ด้าน */}
+            {isProfessional && (
+              <>
+                <button
+                  onClick={() => setActiveTab('homeVisit')}
+                  className={`px-3 py-2 rounded-xl font-medium transition ${
+                    activeTab === 'homeVisit' ? 'bg-emerald-700 text-white font-bold shadow' : 'bg-emerald-50 text-emerald-900'
+                  }`}
+                >
+                  🏠 1. เยี่ยมบ้าน
+                </button>
+                <button
+                  onClick={() => setActiveTab('surveillance')}
+                  className={`px-3 py-2 rounded-xl font-medium transition ${
+                    activeTab === 'surveillance' ? 'bg-amber-600 text-white font-bold shadow' : 'bg-amber-50 text-amber-900'
+                  }`}
+                >
+                  🚨 2. เฝ้าระวังโรค
+                </button>
+                <button
+                  onClick={() => setActiveTab('familyPlanning')}
+                  className={`px-3 py-2 rounded-xl font-medium transition ${
+                    activeTab === 'familyPlanning' ? 'bg-purple-700 text-white font-bold shadow' : 'bg-purple-50 text-purple-900'
+                  }`}
+                >
+                  💊 3. วางแผนครอบครัว
+                </button>
+                <button
+                  onClick={() => setActiveTab('refer')}
+                  className={`px-3 py-2 rounded-xl font-medium transition ${
+                    activeTab === 'refer' ? 'bg-blue-700 text-white font-bold shadow' : 'bg-blue-50 text-blue-900'
+                  }`}
+                >
+                  🚑 4. ส่งต่อ (Refer)
+                </button>
+                <button
+                  onClick={() => setActiveTab('caregiver')}
+                  className={`px-3 py-2 rounded-xl font-medium transition ${
+                    activeTab === 'caregiver' ? 'bg-teal-700 text-white font-bold shadow' : 'bg-teal-50 text-teal-900'
+                  }`}
+                >
+                  🤝 งาน Caregiver
+                </button>
+              </>
+            )}
           </div>
         </section>
 
-        {/* แสดงเนื้อหาตามแท็บ */}
-        {activeTab === 'surveillance' && (
-          <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
-              <div>
-                <h3 className="font-bold text-gray-800 text-base">รายการเฝ้าระวังโรคติดต่อในพื้นที่ (หมู่ 1–17)</h3>
-                <p className="text-xs text-gray-500">ข้อมูลสถานการณ์ระบาดวิทยาและมาตรการควบคุมโรคระดับตำบล</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => exportSurveillanceToExcel(surveillanceCases)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-2 rounded-lg shadow-sm transition font-medium flex items-center gap-1.5"
-                >
-                  <span>📊</span> ส่งออก Excel (.xlsx)
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedPatient({ id: null, full_name: 'เคสทั่วไปในพื้นที่', cid: '-', village_no: 1 });
-                    setShowSurveillanceModal(true);
-                  }}
-                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs px-3 py-2 rounded-lg shadow transition font-medium"
-                >
-                  + บันทึกเคสโรคติดต่อ
-                </button>
-              </div>
-            </div>
-            <SurveillanceSummary cases={surveillanceCases} />
-            <SurveillanceList cases={surveillanceCases} loading={loadingCases} onRefresh={fetchSurveillanceCases} />
-          </section>
+        {/* แสดงเนื้อหาตามแท็บและสิทธิ์ */}
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            userRole={userRole}
+            onNavigate={(tab) => setActiveTab(tab)}
+            stats={{
+              totalPatients: 428,
+              homebound: 34,
+              bedridden: 18,
+              palliative: 7,
+              mch: 56,
+              surveillance: surveillanceCases.length || 12,
+              refer: referRecords.length || 24
+            }}
+          />
         )}
 
-        {activeTab === 'familyPlanning' && (
-          <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex flex-wrap justify-between items-center gap-3 mb-5 border-b pb-4">
-              <div>
-                <h3 className="font-bold text-gray-800 text-base">งานบริการวางแผนครอบครัว (Family Planning)</h3>
-                <p className="text-xs text-gray-500">รพ.สต.วังตะเคียน อำเภอกบินทร์บุรี จังหวัดปราจีนบุรี</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="bg-gray-100 p-1 rounded-xl flex items-center gap-1 text-xs">
-                  <button
-                    onClick={() => setFpViewMode('list')}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                      fpViewMode === 'list' ? 'bg-white text-purple-900 shadow-sm font-bold' : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    📋 ทะเบียนบริการ
-                  </button>
-                  <button
-                    onClick={() => setFpViewMode('report')}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                      fpViewMode === 'report' ? 'bg-white text-purple-900 shadow-sm font-bold' : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    📈 สรุปรายงานตามช่วงเวลา
-                  </button>
-                </div>
-                <button
-                  onClick={() => setShowFPModal(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3.5 py-2 rounded-xl shadow transition font-medium flex items-center gap-1.5"
-                >
-                  <span>+</span> บันทึกบริการวางแผนครอบครัว
-                </button>
-              </div>
-            </div>
-            {fpViewMode === 'list' ? (
-              <FamilyPlanningList records={familyPlanningRecords} loading={loadingFP} />
-            ) : (
-              <FamilyPlanningReport records={familyPlanningRecords} />
-            )}
-          </section>
+        {/* แท็บ Caregiver สำหรับ อสม./CG และ พยาบาล */}
+        {activeTab === 'caregiver' && (isOsmOrCg || isProfessional) && (
+          <CaregiverDashboard currentUser={currentUser} />
         )}
 
-        {/* แท็บ 4: งานส่งต่อ (Refer) */}
-        {activeTab === 'refer' && (
-          <section className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex flex-wrap justify-between items-center gap-3 mb-5 border-b pb-4">
-              <div>
-                <h3 className="font-bold text-gray-800 text-base">
-                  ระบบส่งต่อผู้ป่วย (Patient Refer System)
-                </h3>
-                <p className="text-xs text-gray-500">
-                  ส่งต่อไปยังโรงพยาบาลแม่ข่าย (รพ.กบินทร์บุรี) และจัดทำทะเบียนรายงาน
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {/* สวิตช์สลับโหมด: รายการส่งต่อ VS ทะเบียนรายงาน */}
-                <div className="bg-gray-100 p-1 rounded-xl flex items-center gap-1 text-xs">
-                  <button
-                    onClick={() => setReferViewMode('list')}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                      referViewMode === 'list'
-                        ? 'bg-white text-blue-900 shadow-sm font-bold'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    🚑 รายการส่งต่อ & รับกลับ
-                  </button>
-                  <button
-                    onClick={() => setReferViewMode('report')}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                      referViewMode === 'report'
-                        ? 'bg-white text-blue-900 shadow-sm font-bold'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    📑 ทะเบียนรายงานตามช่วงเวลา
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => setShowReferModal(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3.5 py-2 rounded-xl shadow transition font-medium flex items-center gap-1.5"
-                >
-                  <span>+</span> บันทึกส่งต่อผู้ป่วย
-                </button>
-              </div>
-            </div>
-
-            {/* แสดงตามโหมดที่เลือก */}
-            {referViewMode === 'list' ? (
-              <ReferList
-                records={referRecords}
-                loading={loadingRefer}
-                onRefresh={fetchReferRecords}
-              />
-            ) : (
-              <ReferReport
-                records={referRecords}
-              />
+        {/* แท็บงานวิชาชีพ 4 ด้าน (จำกัดเฉพาะพยาบาล / เจ้าหน้าที่ สธ.) */}
+        {isProfessional && (
+          <>
+            {activeTab === 'homeVisit' && (
+              <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 text-center py-12">
+                <span className="text-4xl block mb-2">🏠</span>
+                <h3 className="font-bold text-slate-800 text-base">ระบบงานเยี่ยมบ้านและประเมิน ADL (พยาบาลวิชาชีพ)</h3>
+                <p className="text-xs text-slate-500 mt-1">สัญญาณชีพ พิกัด GPS ภาพถ่าย 2 ภาพ และลายเซ็นดิจิทัล</p>
+              </section>
             )}
-          </section>
+
+            {activeTab === 'surveillance' && (
+              <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-slate-800 text-base">งานเฝ้าระวังโรคติดต่อ (หมู่ 1–17)</h3>
+                  <div className="flex gap-2">
+                    <button onClick={() => exportSurveillanceToExcel(surveillanceCases)} className="bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-lg">
+                      📊 ส่งออก Excel
+                    </button>
+                    <button onClick={() => setShowSurveillanceModal(true)} className="bg-amber-600 text-white text-xs px-3 py-1.5 rounded-lg">
+                      + บันทึกเคส
+                    </button>
+                  </div>
+                </div>
+                <SurveillanceSummary cases={surveillanceCases} />
+                <SurveillanceList cases={surveillanceCases} loading={loadingCases} onRefresh={fetchSurveillanceCases} />
+              </section>
+            )}
+
+            {activeTab === 'familyPlanning' && (
+              <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-4 pb-3 border-b">
+                  <h3 className="font-bold text-slate-800 text-base">งานบริการวางแผนครอบครัว</h3>
+                  <div className="flex gap-2">
+                    <button onClick={() => setFpViewMode(fpViewMode === 'list' ? 'report' : 'list')} className="bg-slate-100 text-xs px-3 py-1.5 rounded-lg">
+                      {fpViewMode === 'list' ? '📈 ดูรายงานสรุป' : '📋 ดูทะเบียน'}
+                    </button>
+                    <button onClick={() => setShowFPModal(true)} className="bg-purple-600 text-white text-xs px-3 py-1.5 rounded-lg">
+                      + บันทึกบริการ
+                    </button>
+                  </div>
+                </div>
+                {fpViewMode === 'list' ? (
+                  <FamilyPlanningList records={familyPlanningRecords} loading={loadingFP} />
+                ) : (
+                  <FamilyPlanningReport records={familyPlanningRecords} />
+                )}
+              </section>
+            )}
+
+            {activeTab === 'refer' && (
+              <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-4 pb-3 border-b">
+                  <h3 className="font-bold text-slate-800 text-base">ระบบส่งต่อผู้ป่วย (Patient Refer System)</h3>
+                  <div className="flex gap-2">
+                    <button onClick={() => setReferViewMode(referViewMode === 'list' ? 'report' : 'list')} className="bg-slate-100 text-xs px-3 py-1.5 rounded-lg">
+                      {referViewMode === 'list' ? '📑 สมุดทะเบียน' : '🚑 รายการส่งต่อ'}
+                    </button>
+                    <button onClick={() => setShowReferModal(true)} className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded-lg">
+                      + บันทึกส่งต่อ
+                    </button>
+                  </div>
+                </div>
+                {referViewMode === 'list' ? (
+                  <ReferList records={referRecords} loading={loadingRefer} onRefresh={fetchReferRecords} />
+                ) : (
+                  <ReferReport records={referRecords} />
+                )}
+              </section>
+            )}
+          </>
         )}
       </main>
 
-      {/* Modals */}
+      {/* Modals สำหรับบันทึกงาน */}
       {showSurveillanceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-xl my-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="relative w-full max-w-xl">
             <SurveillanceForm
               patient={selectedPatient}
               onClose={() => setShowSurveillanceModal(false)}
-              onSaved={() => {
-                setShowSurveillanceModal(false);
-                updatePendingCount();
-                fetchSurveillanceCases();
-              }}
+              onSaved={() => { setShowSurveillanceModal(false); fetchSurveillanceCases(); }}
             />
           </div>
         </div>
       )}
 
       {showFPModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-xl my-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="relative w-full max-w-xl">
             <FamilyPlanningForm
               onClose={() => setShowFPModal(false)}
-              onSaved={() => {
-                setShowFPModal(false);
-                updatePendingCount();
-                fetchFamilyPlanningRecords();
-              }}
+              onSaved={() => { setShowFPModal(false); fetchFamilyPlanningRecords(); }}
             />
           </div>
         </div>
       )}
 
       {showReferModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="relative w-full max-w-2xl my-8">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="relative w-full max-w-2xl">
             <ReferForm
               onClose={() => setShowReferModal(false)}
-              onSaved={() => {
-                setShowReferModal(false);
-                updatePendingCount();
-                fetchReferRecords();
-              }}
+              onSaved={() => { setShowReferModal(false); fetchReferRecords(); }}
             />
           </div>
         </div>
