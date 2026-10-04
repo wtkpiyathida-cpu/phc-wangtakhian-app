@@ -1,0 +1,21 @@
+{
+  "short_name": "รพ.สต.วังตะเคียน",
+  "name": "ระบบบริการสุขภาพปฐมภูมิ รพ.สต.วังตะเคียน",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#065f46",
+  "theme_color": "#065f46",
+  "display": "standalone",
+  "orientation": "portrait"
+}
