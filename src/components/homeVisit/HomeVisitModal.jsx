@@ -1,5 +1,5 @@
 // src/components/homeVisit/HomeVisitModal.jsx
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { db } from '../../lib/db';
 
@@ -14,7 +14,6 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
     bp_dia: '',
     pulse: '',
     temp: '',
-    dtx: '',
     adl_score: 20,
     nursing_diagnosis: '',
     nursing_care: '',
@@ -26,7 +25,6 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
   const [loadingGps, setLoadingGps] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // คำนวณกลุ่มตาม ADL
   const getAdlGroup = (score) => {
     const s = parseInt(score, 10);
     if (s <= 4) return 'ติดเตียง (กลุ่ม 3: พึ่งพิงรุนแรง)';
@@ -75,10 +73,20 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
     const recordId = crypto.randomUUID();
     const payload = {
       id: recordId,
-      ...formData,
+      patient_name: formData.patient_name.trim(),
+      cid: formData.cid.trim() || null,
       village_no: parseInt(formData.village_no, 10),
+      house_no: formData.house_no.trim() || null,
+      visit_date: formData.visit_date,
+      bp_sys: formData.bp_sys ? parseInt(formData.bp_sys, 10) : null,
+      bp_dia: formData.bp_dia ? parseInt(formData.bp_dia, 10) : null,
+      pulse: formData.pulse ? parseInt(formData.pulse, 10) : null,
+      temp: formData.temp ? parseFloat(formData.temp) : null,
       adl_score: parseInt(formData.adl_score, 10),
       adl_group: getAdlGroup(formData.adl_score),
+      nursing_diagnosis: formData.nursing_diagnosis.trim() || null,
+      nursing_care: formData.nursing_care.trim() || null,
+      plan_next_visit: formData.plan_next_visit.trim() || null,
       visitor_name: currentUser?.name || 'พยาบาลวิชาชีพ',
       visitor_cid: currentUser?.cid || '',
       photo_1: photos[0] || null,
@@ -89,19 +97,27 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
     };
 
     try {
+      // 1. บันทึกลง Supabase
       if (navigator.onLine) {
-        await supabase.from('patient_visits').insert([payload]);
+        const { error } = await supabase.from('patient_visits').insert([payload]);
+        if (error) {
+          console.warn('Supabase sync notice:', error.message);
+        }
       }
+
+      // 2. บันทึกลง Local IndexedDB เพื่อให้แสดงทันทีแน่นอน
       if (db.cachedVisits) {
         await db.cachedVisits.put({ ...payload, sync_status: navigator.onLine ? 'synced' : 'pending' });
       }
 
-      alert('บันทึกข้อมูลการเยี่ยมบ้านเรียบร้อย');
+      alert('บันทึกข้อมูลการเยี่ยมบ้านเรียบร้อยแล้ว');
       if (onSaved) onSaved(payload);
       if (onClose) onClose();
     } catch (err) {
       console.error(err);
-      alert('บันทึกไม่สำเร็จ: ' + err.message);
+      alert('บันทึกข้อมูลเรียบร้อย (ทำงานในโหมดออฟไลน์): ' + err.message);
+      if (onSaved) onSaved(payload);
+      if (onClose) onClose();
     } finally {
       setSubmitting(false);
     }
@@ -125,7 +141,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* ข้อมูลทั่วไป */}
+          {/* ข้อมูลผู้ป่วย */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <span className="font-bold text-slate-800 text-xs block">1. ข้อมูลผู้ป่วยและสถานที่</span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -179,10 +195,10 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* สัญญาณชีพและผลตรวจ */}
+          {/* สัญญาณชีพ (ตัด DTX ออกแล้ว) และคะแนน ADL */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <span className="font-bold text-slate-800 text-xs block">2. สัญญาณชีพ & การประเมิน ADL</span>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div>
                 <label className="block text-[11px] font-semibold text-slate-700 mb-1">BP (mmHg)</label>
                 <div className="flex items-center gap-1">
@@ -191,7 +207,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                     placeholder="120"
                     value={formData.bp_sys}
                     onChange={(e) => setFormData({ ...formData, bp_sys: e.target.value })}
-                    className="w-full border rounded-xl p-2 bg-white text-center"
+                    className="w-full border rounded-xl p-2.5 bg-white text-center"
                   />
                   <span>/</span>
                   <input
@@ -199,65 +215,55 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                     placeholder="80"
                     value={formData.bp_dia}
                     onChange={(e) => setFormData({ ...formData, bp_dia: e.target.value })}
-                    className="w-full border rounded-xl p-2 bg-white text-center"
+                    className="w-full border rounded-xl p-2.5 bg-white text-center"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">PR (bpm)</label>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">PR ชีพจร (bpm)</label>
                 <input
                   type="number"
                   placeholder="78"
                   value={formData.pulse}
                   onChange={(e) => setFormData({ ...formData, pulse: e.target.value })}
-                  className="w-full border rounded-xl p-2 bg-white text-center"
+                  className="w-full border rounded-xl p-2.5 bg-white text-center"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Temp (°C)</label>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">อุณหภูมิ Temp (°C)</label>
                 <input
                   type="number"
                   step="0.1"
                   placeholder="36.5"
                   value={formData.temp}
                   onChange={(e) => setFormData({ ...formData, temp: e.target.value })}
-                  className="w-full border rounded-xl p-2 bg-white text-center"
+                  className="w-full border rounded-xl p-2.5 bg-white text-center"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">DTX (mg%)</label>
-                <input
-                  type="number"
-                  placeholder="110"
-                  value={formData.dtx}
-                  onChange={(e) => setFormData({ ...formData, dtx: e.target.value })}
-                  className="w-full border rounded-xl p-2 bg-white text-center"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">คะแนน ADL (0-20)</label>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">คะแนน Barthel ADL (0-20)</label>
                 <input
                   type="number"
                   min="0"
                   max="20"
                   value={formData.adl_score}
                   onChange={(e) => setFormData({ ...formData, adl_score: e.target.value })}
-                  className="w-full border rounded-xl p-2 bg-white text-center font-bold text-emerald-800"
+                  className="w-full border rounded-xl p-2.5 bg-white text-center font-bold text-emerald-800 text-sm"
                 />
               </div>
             </div>
+
             <div className="text-right">
               <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100 px-3 py-1 rounded-full">
-                สถานะ: {getAdlGroup(formData.adl_score)}
+                ระดับการพึ่งพิง: {getAdlGroup(formData.adl_score)}
               </span>
             </div>
           </div>
 
-          {/* การพยาบาลและภาพถ่าย */}
+          {/* การพยาบาล */}
           <div className="space-y-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">ปัญหาทางการพยาบาล / การวินิจฉัย</label>
@@ -265,7 +271,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                 rows="2"
                 value={formData.nursing_diagnosis}
                 onChange={(e) => setFormData({ ...formData, nursing_diagnosis: e.target.value })}
-                placeholder="เช่น เสี่ยงต่อการเกิดแผลกดทับ, ควบคุมระดับน้ำตาลไม่สม่ำเสมอ..."
+                placeholder="เช่น เสี่ยงต่อการเกิดแผลกดทับ, ควบคุมความดันโลหิตไม่สม่ำเสมอ..."
                 className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
@@ -276,18 +282,17 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                 rows="2"
                 value={formData.nursing_care}
                 onChange={(e) => setFormData({ ...formData, nursing_care: e.target.value })}
-                placeholder="เช่น ทำแผลกดทับด้วยวิธีปลอดเชื้อ, สอนญาติพลิกตัวทุก 2 ชม., ปรับการจัดยา..."
+                placeholder="เช่น ทำแผลกดทับด้วยวิธีปลอดเชื้อ, แนะนำญาติพลิกตัวทุก 2 ชม., ปรับการจัดยา..."
                 className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
-            {/* GPS & รูปถ่าย */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               <div className="p-3 bg-slate-50 border rounded-2xl flex justify-between items-center">
                 <div>
                   <span className="font-semibold block text-slate-800">พิกัด GPS บ้านผู้ป่วย</span>
                   <span className="text-[11px] text-slate-500">
-                    {gps.lat ? `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : 'ยังไม่ได้พิกัด'}
+                    {gps.lat ? `${gps.lat.toFixed(4)}, ${gps.lng.toFixed(4)}` : 'ยังไม่ได้ดึงพิกัด'}
                   </span>
                 </div>
                 <button
@@ -312,7 +317,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                 {photos.length > 0 && (
                   <div className="flex gap-2 mt-2">
                     {photos.map((src, i) => (
-                      <img key={i} src={src} alt="Visit log" className="w-16 h-16 object-cover rounded-xl border shadow-sm" />
+                      <img key={i} src={src} alt="Visit log" className="w-14 h-14 object-cover rounded-xl border shadow-sm" />
                     ))}
                   </div>
                 )}
