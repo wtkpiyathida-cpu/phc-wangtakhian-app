@@ -25,6 +25,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
   const [loadingGps, setLoadingGps] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // คำนวณกลุ่มตามคะแนน ADL
   const getAdlGroup = (score) => {
     const s = parseInt(score, 10);
     if (s <= 4) return 'ติดเตียง (กลุ่ม 3: พึ่งพิงรุนแรง)';
@@ -97,26 +98,29 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
     };
 
     try {
-      // 1. บันทึกลง Supabase
-      if (navigator.onLine) {
-        const { error } = await supabase.from('patient_visits').insert([payload]);
-        if (error) {
-          console.warn('Supabase sync notice:', error.message);
-        }
+      // 1. ส่งข้อมูลขึ้นหน้าจอทันที เพื่อให้แสดงผลโดยไม่ต้องรอโหลด
+      if (onSaved) {
+        onSaved(payload);
       }
 
-      // 2. บันทึกลง Local IndexedDB เพื่อให้แสดงทันทีแน่นอน
+      // 2. บันทึกลง IndexedDB บนเครื่องผู้ใช้งาน
       if (db.cachedVisits) {
         await db.cachedVisits.put({ ...payload, sync_status: navigator.onLine ? 'synced' : 'pending' });
       }
 
+      // 3. ซิงก์ขึ้น Supabase หากออนไลน์
+      if (navigator.onLine) {
+        const { error } = await supabase.from('patient_visits').insert([payload]);
+        if (error) {
+          console.error('Supabase insert warning:', error.message);
+        }
+      }
+
       alert('บันทึกข้อมูลการเยี่ยมบ้านเรียบร้อยแล้ว');
-      if (onSaved) onSaved(payload);
       if (onClose) onClose();
     } catch (err) {
-      console.error(err);
-      alert('บันทึกข้อมูลเรียบร้อย (ทำงานในโหมดออฟไลน์): ' + err.message);
-      if (onSaved) onSaved(payload);
+      console.error('Save error:', err);
+      alert('บันทึกข้อมูลเรียบร้อย (บันทึกระดับเครื่อง): ' + err.message);
       if (onClose) onClose();
     } finally {
       setSubmitting(false);
@@ -195,7 +199,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* สัญญาณชีพ (ตัด DTX ออกแล้ว) และคะแนน ADL */}
+          {/* สัญญาณชีพและคะแนน ADL (ไม่มี DTX แล้ว) */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <span className="font-bold text-slate-800 text-xs block">2. สัญญาณชีพ & การประเมิน ADL</span>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -263,7 +267,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* การพยาบาล */}
+          {/* ปัญหาและการพยาบาล */}
           <div className="space-y-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">ปัญหาทางการพยาบาล / การวินิจฉัย</label>
@@ -287,6 +291,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
               />
             </div>
 
+            {/* GPS และภาพถ่าย */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               <div className="p-3 bg-slate-50 border rounded-2xl flex justify-between items-center">
                 <div>
