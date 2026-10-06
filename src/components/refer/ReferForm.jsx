@@ -1,373 +1,339 @@
 // src/components/refer/ReferForm.jsx
 import React, { useState, useEffect } from 'react';
-import { db } from '../../lib/db';
 import { supabase } from '../../lib/supabase';
+import { db } from '../../lib/db';
 
-const REFER_REASONS = [
-  'เกินขีดความสามารถในการตรวจรักษาของ รพ.สต.',
-  'รับการตรวจรักษาเพิ่มเติม',
-  'ส่งพบแพทย์ตามนัด/เกณฑ์มาตรฐาน'
-];
-
-export default function ReferForm({ patient, onClose, onSaved }) {
-  // ฟังก์ชันคำนวณปีงบประมาณ พ.ศ. ตามเกณฑ์ราชการ (1 ต.ค. เป็นต้นไปนับเป็นปีถัดไป)
-  const calculateFiscalYear = (dateObj = new Date()) => {
-    const yearCE = dateObj.getFullYear();
-    const month = dateObj.getMonth() + 1; // 1-12
-    return month >= 10 ? yearCE + 543 + 1 : yearCE + 543;
-  };
-
-  const [currentFiscalYear] = useState(calculateFiscalYear());
-  const [nextReferNo, setNextReferNo] = useState(1);
-
+export default function ReferForm({ editingRecord, currentUser, onClose, onSaved }) {
   const [formData, setFormData] = useState({
-    patient_name: patient?.full_name || '',
-    cid: patient?.cid || '',
-    age: patient?.age || '',
-    gender: patient?.gender || 'หญิง',
+    refer_no: '',
+    patient_name: '',
+    cid: '',
+    age: '',
+    gender: 'ชาย',
+    village_no: '1',
     house_no: '',
-    village_no: patient?.village_no !== undefined ? patient.village_no : 1,
+    refer_date: new Date().toISOString().split('T')[0],
+    refer_time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }),
     destination_hospital: 'โรงพยาบาลกบินทร์บุรี',
-    urgency: 'urgent',
-    chief_complaint: '',
+    urgency: 'ด่วนมาก',
+    bp: '120/80',
+    pulse: '80',
+    temp: '36.5',
+    o2sat: '98',
+    cc_pe: '',
     preliminary_diagnosis: '',
-    bp: '',
-    pulse: '',
-    temp: '',
-    spo2: '',
-    pre_referral_treatment: '',
-    reason_for_refer: REFER_REASONS[0]
+    refer_reason: 'เกินขีดความสามารถในการตรวจรักษาของ รพ.สต.',
+    pre_refer_treatment: ''
   });
 
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // ดึงหมายเลขลำดับที่ถัดไปในปีงบประมาณปัจจุบัน (เริ่ม 1 ใหม่เมื่อเข้าสู่ 1 ต.ค.)
+  // ดึงข้อมูลเดิมมาใส่ฟอร์มหากเป็นการกด "แก้ไข"
   useEffect(() => {
-    const fetchNextReferNo = async () => {
-      try {
-        let maxNo = 0;
-
-        // 1. ตรวจสอบใน Supabase ก่อน
-        if (navigator.onLine) {
-          const { data, error } = await supabase
-            .from('patient_refers')
-            .select('refer_no')
-            .eq('fiscal_year', currentFiscalYear)
-            .order('refer_no', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (!error && data?.refer_no) {
-            maxNo = data.refer_no;
-          }
-        }
-
-        // 2. ตรวจสอบเทียบกับในเครื่อง (IndexedDB)
-        const localItems = await db.patientRefers
-          .filter((r) => r.fiscal_year === currentFiscalYear && r.refer_no)
-          .toArray();
-
-        if (localItems.length > 0) {
-          const localMax = Math.max(...localItems.map((r) => r.refer_no || 0));
-          if (localMax > maxNo) maxNo = localMax;
-        }
-
-        setNextReferNo(maxNo + 1);
-      } catch (err) {
-        console.error('Error calculating next refer number:', err);
-        setNextReferNo(1);
-      }
-    };
-
-    fetchNextReferNo();
-  }, [currentFiscalYear]);
+    if (editingRecord) {
+      setFormData({
+        refer_no: editingRecord.refer_no || '',
+        patient_name: editingRecord.patient_name || '',
+        cid: editingRecord.cid || '',
+        age: editingRecord.age || '',
+        gender: editingRecord.gender || 'ชาย',
+        village_no: String(editingRecord.village_no || '1'),
+        house_no: editingRecord.house_no || '',
+        refer_date: editingRecord.refer_date || new Date().toISOString().split('T')[0],
+        refer_time: editingRecord.refer_time || '',
+        destination_hospital: editingRecord.destination_hospital || 'โรงพยาบาลกบินทร์บุรี',
+        urgency: editingRecord.urgency || 'ด่วนมาก',
+        bp: editingRecord.bp || '',
+        pulse: editingRecord.pulse || '',
+        temp: editingRecord.temp || '',
+        o2sat: editingRecord.o2sat || '',
+        cc_pe: editingRecord.cc_pe || '',
+        preliminary_diagnosis: editingRecord.preliminary_diagnosis || '',
+        refer_reason: editingRecord.refer_reason || '',
+        pre_refer_treatment: editingRecord.pre_refer_treatment || ''
+      });
+    }
+  }, [editingRecord]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
+    setLoading(true);
 
-    const recordId = crypto.randomUUID();
+    const recordId = editingRecord ? editingRecord.id : crypto.randomUUID();
     const payload = {
       id: recordId,
-      refer_no: nextReferNo,
-      fiscal_year: currentFiscalYear,
-      patient_id: patient?.id || null,
-      patient_name: formData.patient_name.trim(),
-      cid: formData.cid.trim() || null,
-      age: formData.age ? parseInt(formData.age, 10) : null,
-      gender: formData.gender,
-      house_no: formData.house_no.trim() || null,
+      ...formData,
       village_no: parseInt(formData.village_no, 10),
-      refer_date: new Date().toISOString(),
-      destination_hospital: formData.destination_hospital.trim(),
-      urgency: formData.urgency,
-      chief_complaint: formData.chief_complaint.trim(),
-      preliminary_diagnosis: formData.preliminary_diagnosis.trim(),
-      bp: formData.bp.trim() || null,
-      pulse: formData.pulse ? parseInt(formData.pulse, 10) : null,
-      temp: formData.temp ? parseFloat(formData.temp) : null,
-      spo2: formData.spo2 ? parseInt(formData.spo2, 10) : null,
-      pre_referral_treatment: formData.pre_referral_treatment.trim() || null,
-      reason_for_refer: formData.reason_for_refer,
-      status: 'pending'
+      age: formData.age ? parseInt(formData.age, 10) : null,
+      sender_name: currentUser?.name || 'พยาบาลวิชาชีพ',
+      sender_position: currentUser?.position || 'พยาบาลวิชาชีพ',
+      status: editingRecord?.status || 'อยู่ระหว่างส่งต่อ',
+      updated_at: new Date().toISOString()
     };
 
+    if (!editingRecord) {
+      payload.created_at = new Date().toISOString();
+    }
+
     try {
-      if (navigator.onLine) {
-        const { error } = await supabase.from('patient_refers').insert([payload]);
-        if (error) throw error;
-        await db.patientRefers.put({ ...payload, sync_status: 'synced' });
+      if (editingRecord) {
+        // อัปเดตข้อมูลเดิม (Update)
+        if (navigator.onLine) {
+          const { error } = await supabase.from('patient_refers').update(payload).eq('id', recordId);
+          if (error) console.error('Supabase update warning:', error.message);
+        }
+        if (db.patientRefers) {
+          await db.patientRefers.put({ ...payload, sync_status: 'synced' });
+        }
+        alert('แก้ไขข้อมูลส่งต่อเรียบร้อยแล้ว');
       } else {
-        await db.patientRefers.put({ ...payload, sync_status: 'pending' });
-        await db.syncQueue.add({
-          table_name: 'patient_refers',
-          action: 'INSERT',
-          payload: payload,
-          created_at: new Date().toISOString()
-        });
+        // เพิ่มข้อมูลใหม่ (Insert)
+        if (navigator.onLine) {
+          const { error } = await supabase.from('patient_refers').insert([payload]);
+          if (error) console.error('Supabase insert warning:', error.message);
+        }
+        if (db.patientRefers) {
+          await db.patientRefers.put({ ...payload, sync_status: 'synced' });
+        }
+        alert('บันทึกการส่งต่อผู้ป่วยเรียบร้อยแล้ว');
       }
 
-      alert(`บันทึกส่งต่อสำเร็จ (ใบส่งตัวหมายเลข ${nextReferNo}/${currentFiscalYear})`);
       if (onSaved) onSaved(payload);
       if (onClose) onClose();
     } catch (err) {
-      console.error(err);
       alert('เกิดข้อผิดพลาดในการบันทึก: ' + err.message);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow-2xl border border-gray-100 max-w-2xl w-full mx-auto font-sans max-h-[90vh] overflow-y-auto">
-      {/* ส่วนหัวแสดงเลขที่และปีงบประมาณ */}
-      <div className="flex justify-between items-start border-b pb-3 mb-4 sticky top-0 bg-white z-10">
+    <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto font-sans">
+      <div className="flex justify-between items-center border-b pb-3 mb-4 sticky top-0 bg-white z-10">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🚑</span>
-            <h2 className="text-lg font-bold text-gray-800">บันทึกส่งต่อผู้ป่วย (Refer Out)</h2>
-            <span className="bg-blue-100 text-blue-900 border border-blue-200 text-xs px-2.5 py-0.5 rounded-full font-bold">
-              ใบส่งตัวหมายเลข {nextReferNo} /{currentFiscalYear}
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            ปีงบประมาณ พ.ศ. {currentFiscalYear} (เริ่มนับ 1 ใหม่ทุก 1 ต.ค.)
+          <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+            <span>🚑</span> {editingRecord ? 'แก้ไขข้อมูลส่งต่อผู้ป่วย' : 'บันทึกส่งต่อผู้ป่วย (Refer Out)'}
+          </h3>
+          <p className="text-xs text-blue-700 font-medium">
+            ผู้บันทึก: {currentUser?.name} ({currentUser?.position})
           </p>
         </div>
-        {onClose && (
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl font-bold">
+          &times;
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        {/* ข้อมูลพื้นฐานผู้ป่วย */}
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <span className="font-bold text-slate-800 text-xs block">1. ข้อมูลผู้ป่วย & สถานที่ส่งต่อ</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-700 mb-1">ชื่อ - สกุล ผู้ป่วย *</label>
+              <input
+                type="text"
+                required
+                value={formData.patient_name}
+                onChange={(e) => setFormData({ ...formData, patient_name: e.target.value })}
+                placeholder="เช่น นายสมชาย หวันทา"
+                className="w-full border rounded-xl p-2.5 bg-white outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">เลขประจำตัวประชาชน (13 หลัก)</label>
+              <input
+                type="text"
+                maxLength="13"
+                value={formData.cid}
+                onChange={(e) => setFormData({ ...formData, cid: e.target.value })}
+                placeholder="13 หลัก"
+                className="w-full border rounded-xl p-2.5 bg-white font-mono outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">อายุ (ปี)</label>
+              <input
+                type="number"
+                value={formData.age}
+                onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                placeholder="เช่น 59"
+                className="w-full border rounded-xl p-2.5 bg-white outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">เพศ</label>
+              <select
+                value={formData.gender}
+                onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                className="w-full border rounded-xl p-2.5 bg-white outline-none"
+              >
+                <option value="ชาย">ชาย</option>
+                <option value="หญิง">หญิง</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">หมู่ที่ (ต.วังตะเคียน)</label>
+              <select
+                value={formData.village_no}
+                onChange={(e) => setFormData({ ...formData, village_no: e.target.value })}
+                className="w-full border rounded-xl p-2.5 bg-white outline-none"
+              >
+                {Array.from({ length: 17 }, (_, i) => i + 1).map((v) => (
+                  <option key={v} value={v}>หมู่ {v}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">บ้านเลขที่</label>
+              <input
+                type="text"
+                value={formData.house_no}
+                onChange={(e) => setFormData({ ...formData, house_no: e.target.value })}
+                placeholder="เช่น 36/1"
+                className="w-full border rounded-xl p-2.5 bg-white outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">ส่งต่อไปยังสถานพยาบาล</label>
+              <input
+                type="text"
+                value={formData.destination_hospital}
+                onChange={(e) => setFormData({ ...formData, destination_hospital: e.target.value })}
+                className="w-full border rounded-xl p-2.5 bg-white outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">ระดับความเร่งด่วน</label>
+              <select
+                value={formData.urgency}
+                onChange={(e) => setFormData({ ...formData, urgency: e.target.value })}
+                className="w-full border rounded-xl p-2.5 bg-white outline-none font-semibold text-blue-900"
+              >
+                <option value="ทั่วไป">ทั่วไป (Non-urgent)</option>
+                <option value="ด่วนมาก">ด่วนมาก (Urgent)</option>
+                <option value="ฉุกเฉิน">ฉุกเฉิน (Emergency)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* สัญญาณชีพแรกรับ */}
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <span className="font-bold text-slate-800 text-xs block">2. สัญญาณชีพแรกรับก่อนส่งต่อ (Vital Signs)</span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">BP (mmHg)</label>
+              <input
+                type="text"
+                value={formData.bp}
+                onChange={(e) => setFormData({ ...formData, bp: e.target.value })}
+                placeholder="120/80"
+                className="w-full border rounded-xl p-2 bg-white text-center"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">Pulse (bpm)</label>
+              <input
+                type="text"
+                value={formData.pulse}
+                onChange={(e) => setFormData({ ...formData, pulse: e.target.value })}
+                placeholder="80"
+                className="w-full border rounded-xl p-2 bg-white text-center"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">Temp (°C)</label>
+              <input
+                type="text"
+                value={formData.temp}
+                onChange={(e) => setFormData({ ...formData, temp: e.target.value })}
+                placeholder="36.5"
+                className="w-full border rounded-xl p-2 bg-white text-center"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">O2 Sat (%)</label>
+              <input
+                type="text"
+                value={formData.o2sat}
+                onChange={(e) => setFormData({ ...formData, o2sat: e.target.value })}
+                placeholder="98"
+                className="w-full border rounded-xl p-2 bg-white text-center"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* อาการและการวินิจฉัย */}
+        <div className="space-y-3">
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">อาการสำคัญและการตรวจพบ (CC & PE)</label>
+            <textarea
+              rows="2"
+              value={formData.cc_pe}
+              onChange={(e) => setFormData({ ...formData, cc_pe: e.target.value })}
+              placeholder="อาการสำคัญที่พบก่อนส่งต่อ..."
+              className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-600"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">การวินิจฉัยโรคเบื้องต้น (Impression) *</label>
+              <input
+                type="text"
+                required
+                value={formData.preliminary_diagnosis}
+                onChange={(e) => setFormData({ ...formData, preliminary_diagnosis: e.target.value })}
+                placeholder="เช่น Eye trauma, R/o Appendicitis"
+                className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">สาเหตุการส่งต่อผู้ป่วย</label>
+              <input
+                type="text"
+                value={formData.refer_reason}
+                onChange={(e) => setFormData({ ...formData, refer_reason: e.target.value })}
+                className="w-full border rounded-xl p-2.5 outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 mb-1">การรักษาพยาบาล / ยาที่ให้ก่อนส่งต่อ</label>
+            <textarea
+              rows="2"
+              value={formData.pre_refer_treatment}
+              onChange={(e) => setFormData({ ...formData, pre_refer_treatment: e.target.value })}
+              placeholder="เช่น NSS 1000 ml IV drip, Paracetamol 500 mg 1 tab..."
+              className="w-full border rounded-xl p-2.5 outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-4 border-t">
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none p-1"
+            className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-medium"
           >
-            &times;
+            ยกเลิก
           </button>
-        )}
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* ชื่อผู้ป่วย และ เลขบัตร */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="sm:col-span-2">
-            <label className="block text-xs font-semibold text-gray-700 mb-1">ชื่อ-สกุล ผู้ป่วย</label>
-            <input
-              type="text"
-              value={formData.patient_name}
-              onChange={(e) => setFormData({ ...formData, patient_name: e.target.value })}
-              placeholder="ระบุชื่อ-สกุล"
-              className="w-full border rounded-lg p-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">เลขบัตรประชาชน</label>
-            <input
-              type="text"
-              maxLength="13"
-              value={formData.cid}
-              onChange={(e) => setFormData({ ...formData, cid: e.target.value })}
-              placeholder="13 หลัก"
-              className="w-full border rounded-lg p-2.5 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-            />
-          </div>
-        </div>
-
-        {/* อายุ เพศ บ้านเลขที่ หมู่ที่ */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">อายุ (ปี)</label>
-            <input
-              type="number"
-              min="0"
-              value={formData.age}
-              onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-              placeholder="อายุ"
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">เพศ</label>
-            <select
-              value={formData.gender}
-              onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-            >
-              <option value="หญิง">หญิง</option>
-              <option value="ชาย">ชาย</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">บ้านเลขที่</label>
-            <input
-              type="text"
-              value={formData.house_no}
-              onChange={(e) => setFormData({ ...formData, house_no: e.target.value })}
-              placeholder="เช่น 12/1"
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">หมู่ที่</label>
-            <select
-              value={formData.village_no}
-              onChange={(e) => setFormData({ ...formData, village_no: e.target.value })}
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-            >
-              <option value="0">นอกเขต</option>
-              {Array.from({ length: 17 }, (_, i) => i + 1).map((m) => (
-                <option key={m} value={m}>หมู่ {m}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* โรงพยาบาลปลายทาง และ ความเร่งด่วน */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-blue-50/50 rounded-xl border border-blue-100">
-          <div>
-            <label className="block text-xs font-semibold text-blue-900 mb-1">ส่งต่อไปยังสถานพยาบาล</label>
-            <input
-              type="text"
-              value={formData.destination_hospital}
-              onChange={(e) => setFormData({ ...formData, destination_hospital: e.target.value })}
-              className="w-full border border-blue-200 rounded-lg p-2 text-sm bg-white font-medium text-gray-800 outline-none"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-blue-900 mb-1">ระดับความเร่งด่วน</label>
-            <select
-              value={formData.urgency}
-              onChange={(e) => setFormData({ ...formData, urgency: e.target.value })}
-              className="w-full border border-blue-200 rounded-lg p-2 text-sm bg-white font-bold text-gray-800 outline-none"
-            >
-              <option value="emergency" className="text-red-600 font-bold">🔴 วิกฤต / ฉุกเฉิน (Emergency)</option>
-              <option value="urgent" className="text-amber-600 font-bold">🟡 ด่วนมาก (Urgent)</option>
-              <option value="routine" className="text-emerald-600 font-bold">🟢 ทั่วไป / นัดตรวจต่อ (Routine)</option>
-            </select>
-          </div>
-        </div>
-
-        {/* สัญญาณชีพ */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1">สัญญาณชีพแรกรับก่อนส่งต่อ (Vital Signs)</label>
-          <div className="grid grid-cols-4 gap-2 text-xs">
-            <input
-              type="text"
-              placeholder="BP (เช่น 120/80)"
-              value={formData.bp}
-              onChange={(e) => setFormData({ ...formData, bp: e.target.value })}
-              className="border rounded-lg p-2 text-center outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <input
-              type="number"
-              placeholder="PR (ครั้ง/นาที)"
-              value={formData.pulse}
-              onChange={(e) => setFormData({ ...formData, pulse: e.target.value })}
-              className="border rounded-lg p-2 text-center outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <input
-              type="number"
-              step="0.1"
-              placeholder="Temp (°C)"
-              value={formData.temp}
-              onChange={(e) => setFormData({ ...formData, temp: e.target.value })}
-              className="border rounded-lg p-2 text-center outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <input
-              type="number"
-              placeholder="SpO2 (%)"
-              value={formData.spo2}
-              onChange={(e) => setFormData({ ...formData, spo2: e.target.value })}
-              className="border rounded-lg p-2 text-center outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* อาการสำคัญ */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1">อาการสำคัญและการตรวจพบ (CC & PE)</label>
-          <textarea
-            rows="2"
-            value={formData.chief_complaint}
-            onChange={(e) => setFormData({ ...formData, chief_complaint: e.target.value })}
-            placeholder="ระบุอาการสำคัญ เช่น แน่นหน้าอก หายใจเหนื่อยหอบ มีไข้สูง 3 วัน..."
-            className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-        </div>
-
-        {/* วินิจฉัยเบื้องต้น & สาเหตุการส่งต่อ (ตัวเลือก 3 ข้อ) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">การวินิจฉัยโรคเบื้องต้น (Impression)</label>
-            <input
-              type="text"
-              value={formData.preliminary_diagnosis}
-              onChange={(e) => setFormData({ ...formData, preliminary_diagnosis: e.target.value })}
-              placeholder="เช่น Suspected ACS, Acute Appendicitis"
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">สาเหตุการส่งต่อผู้ป่วย</label>
-            <select
-              value={formData.reason_for_refer}
-              onChange={(e) => setFormData({ ...formData, reason_for_refer: e.target.value })}
-              className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50"
-            >
-              {REFER_REASONS.map((reason) => (
-                <option key={reason} value={reason}>{reason}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* การรักษาพยาบาลเบื้องต้น */}
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1">การรักษาพยาบาล / ยาที่ให้ก่อนส่งต่อ</label>
-          <textarea
-            rows="2"
-            value={formData.pre_referral_treatment}
-            onChange={(e) => setFormData({ ...formData, pre_referral_treatment: e.target.value })}
-            placeholder="เช่น On O2 cannula 3 LPM, ให้ยา Paracetamol 500 mg 1 tab, เปิด IV 0.9% NSS..."
-            className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <div className="pt-2">
           <button
             type="submit"
-            disabled={submitting}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition shadow disabled:opacity-50"
+            disabled={loading}
+            className="flex-1 bg-blue-700 hover:bg-blue-800 text-white py-3 rounded-xl font-semibold shadow disabled:opacity-50"
           >
-            {submitting ? 'กำลังบันทึก...' : `บันทึกส่งต่อผู้ป่วย (หมายเลข ${nextReferNo}/${currentFiscalYear})`}
+            {loading ? 'กำลังบันทึก...' : editingRecord ? 'บันทึกการแก้ไข' : 'บันทึกการส่งต่อผู้ป่วย'}
           </button>
         </div>
       </form>

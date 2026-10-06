@@ -37,25 +37,30 @@ export default function App() {
   const [fpViewMode, setFpViewMode] = useState('list');
   const [referViewMode, setReferViewMode] = useState('list');
 
-  // ข้อมูลแต่ละโมดูล
+  // ข้อมูลรายการในแต่ละโมดูล
   const [homeVisits, setHomeVisits] = useState([]);
   const [surveillanceCases, setSurveillanceCases] = useState([]);
   const [familyPlanningRecords, setFamilyPlanningRecords] = useState([]);
   const [referRecords, setReferRecords] = useState([]);
 
-  // สถานะเปิด/ปิด Modals
+  // สถานะเปิด/ปิด Modals สำหรับบันทึก/แก้ไข
   const [showHomeVisitModal, setShowHomeVisitModal] = useState(false);
   const [showSurveillanceModal, setShowSurveillanceModal] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState(null);
   const [showFPModal, setShowFPModal] = useState(false);
   const [showReferModal, setShowReferModal] = useState(false);
+
+  // --- รวม Edit State ทั้ง 4 โมดูล (เก็บข้อมูลเคสที่เลือกมาแก้ไข) ---
+  const [editingVisitRecord, setEditingVisitRecord] = useState(null);
+  const [editingSurveillanceRecord, setEditingSurveillanceRecord] = useState(null);
+  const [editingFpRecord, setEditingFpRecord] = useState(null);
+  const [editingReferRecord, setEditingReferRecord] = useState(null);
 
   // ตรวจสอบสิทธิ์ผู้ใช้งาน
   const userRole = currentUser ? currentUser.role : isGuestMode ? 'guest' : null;
   const isProfessional = ['nurse', 'public_health_officer', 'health_officer'].includes(userRole);
   const isOsmOrCg = ['osm', 'caregiver'].includes(userRole);
 
-  // โหลดผู้ใช้ที่บันทึกไว้ใน LocalStorage
+  // ดึงข้อมูลผู้ใช้งานที่เซฟไว้ในเครื่อง
   useEffect(() => {
     const savedUser = localStorage.getItem('phc_local_user');
     if (savedUser) {
@@ -75,7 +80,7 @@ export default function App() {
     setActiveTab('dashboard');
   };
 
-  // ดึงข้อมูลการเยี่ยมบ้าน
+  // ฟังก์ชันดึงข้อมูลโมดูล 1: เยี่ยมบ้าน
   const fetchHomeVisits = async () => {
     try {
       if (navigator.onLine) {
@@ -103,7 +108,7 @@ export default function App() {
     }
   };
 
-  // ดึงข้อมูลเฝ้าระวังโรค
+  // ฟังก์ชันดึงข้อมูลโมดูล 2: เฝ้าระวังโรค
   const fetchSurveillanceCases = async () => {
     try {
       if (navigator.onLine) {
@@ -127,7 +132,7 @@ export default function App() {
     }
   };
 
-  // ดึงข้อมูลวางแผนครอบครัว
+  // ฟังก์ชันดึงข้อมูลโมดูล 3: วางแผนครอบครัว
   const fetchFamilyPlanningRecords = async () => {
     try {
       if (navigator.onLine) {
@@ -151,7 +156,7 @@ export default function App() {
     }
   };
 
-  // ดึงข้อมูลส่งต่อ
+  // ฟังก์ชันดึงข้อมูลโมดูล 4: งานส่งต่อ (Refer)
   const fetchReferRecords = async () => {
     try {
       if (navigator.onLine) {
@@ -190,7 +195,7 @@ export default function App() {
     );
   }
 
-  // หน้า Login สำหรับผู้ใช้ที่ยังไม่ล็อกอินและไม่ได้เลือก Guest Mode
+  // หน้า Login สำหรับผู้ใช้ที่ยังไม่ล็อกอินและไม่ได้เลือก Guest
   if (!currentUser && !isGuestMode) {
     return (
       <Login
@@ -221,7 +226,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* ฝั่งขวา: แสดงชื่อ + ตำแหน่ง และปุ่มออกจากระบบ */}
+          {/* ฝั่งขวา: แสดงชื่อ + ตำแหน่ง (position_title) และปุ่มออกจากระบบ */}
           <div className="flex items-center gap-3">
             {currentUser ? (
               <div className="flex items-center gap-3">
@@ -253,9 +258,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Container */}
+      {/* แถบเมนูแท็บหลัก */}
       <main className="max-w-6xl mx-auto px-4 py-5 flex-1 w-full space-y-5">
-        {/* เมนูแท็บการทำงานตามสิทธิ์ */}
         <section className="bg-white p-2.5 rounded-2xl shadow-sm border border-slate-200">
           <div className="flex flex-wrap gap-2 text-xs">
             <button
@@ -267,7 +271,7 @@ export default function App() {
               📊 หน้าหลัก (Dashboard)
             </button>
 
-            {/* แท็บสำหรับ อสม. / Caregiver */}
+            {/* แท็บเฉพาะ อสม. / Caregiver */}
             {isOsmOrCg && (
               <button
                 onClick={() => setActiveTab('caregiver')}
@@ -279,7 +283,7 @@ export default function App() {
               </button>
             )}
 
-            {/* แท็บสำหรับเจ้าหน้าที่วิชาชีพ (เข้าถึงครบทุกโมดูล) */}
+            {/* แท็บสำหรับเจ้าหน้าที่วิชาชีพ (พยาบาล/สธ.) */}
             {isProfessional && (
               <>
                 <button
@@ -327,7 +331,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* 1. หน้า Dashboard สรุปยอด */}
+        {/* ---------------- 1. Dashboard ---------------- */}
         {activeTab === 'dashboard' && (
           <Dashboard
             userRole={userRole}
@@ -344,20 +348,27 @@ export default function App() {
           />
         )}
 
-        {/* 2. โมดูลเยี่ยมบ้านสำหรับเจ้าหน้าที่วิชาชีพ */}
+        {/* ---------------- 2. โมดูลเยี่ยมบ้าน ---------------- */}
         {activeTab === 'homeVisit' && isProfessional && (
           <HomeVisitList
             visits={homeVisits}
-            onNewVisit={() => setShowHomeVisitModal(true)}
+            onNewVisit={() => {
+              setEditingVisitRecord(null);
+              setShowHomeVisitModal(true);
+            }}
+            onEdit={(record) => {
+              setEditingVisitRecord(record);
+              setShowHomeVisitModal(true);
+            }}
           />
         )}
 
-        {/* 3. โมดูล Caregiver / อสม. */}
+        {/* ---------------- 3. โมดูล Caregiver ---------------- */}
         {activeTab === 'caregiver' && (isOsmOrCg || isProfessional) && (
           <CaregiverDashboard currentUser={currentUser} />
         )}
 
-        {/* 4. โมดูลเฝ้าระวังโรคติดต่อ */}
+        {/* ---------------- 4. โมดูลเฝ้าระวังโรคติดต่อ ---------------- */}
         {activeTab === 'surveillance' && isProfessional && (
           <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-4">
@@ -371,7 +382,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    setSelectedPatient(null);
+                    setEditingSurveillanceRecord(null);
                     setShowSurveillanceModal(true);
                   }}
                   className="bg-amber-600 hover:bg-amber-700 text-white text-xs px-3 py-1.5 rounded-lg transition"
@@ -381,11 +392,18 @@ export default function App() {
               </div>
             </div>
             <SurveillanceSummary cases={surveillanceCases} />
-            <SurveillanceList cases={surveillanceCases} onRefresh={fetchSurveillanceCases} />
+            <SurveillanceList
+              cases={surveillanceCases}
+              onRefresh={fetchSurveillanceCases}
+              onEdit={(record) => {
+                setEditingSurveillanceRecord(record);
+                setShowSurveillanceModal(true);
+              }}
+            />
           </section>
         )}
 
-        {/* 5. โมดูลวางแผนครอบครัว */}
+        {/* ---------------- 5. โมดูลวางแผนครอบครัว ---------------- */}
         {activeTab === 'familyPlanning' && isProfessional && (
           <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-4 pb-3 border-b">
@@ -398,7 +416,10 @@ export default function App() {
                   {fpViewMode === 'list' ? '📈 ดูรายงานสรุป' : '📋 ดูทะเบียน'}
                 </button>
                 <button
-                  onClick={() => setShowFPModal(true)}
+                  onClick={() => {
+                    setEditingFpRecord(null);
+                    setShowFPModal(true);
+                  }}
                   className="bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1.5 rounded-lg transition shadow"
                 >
                   + บันทึกบริการ
@@ -406,14 +427,20 @@ export default function App() {
               </div>
             </div>
             {fpViewMode === 'list' ? (
-              <FamilyPlanningList records={familyPlanningRecords} />
+              <FamilyPlanningList
+                records={familyPlanningRecords}
+                onEdit={(record) => {
+                  setEditingFpRecord(record);
+                  setShowFPModal(true);
+                }}
+              />
             ) : (
               <FamilyPlanningReport records={familyPlanningRecords} />
             )}
           </section>
         )}
 
-        {/* 6. โมดูลส่งต่อ (Refer) */}
+        {/* ---------------- 6. โมดูลส่งต่อ (Refer) ---------------- */}
         {activeTab === 'refer' && isProfessional && (
           <section className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
             <div className="flex justify-between items-center mb-4 pb-3 border-b">
@@ -426,7 +453,10 @@ export default function App() {
                   {referViewMode === 'list' ? '📑 สมุดทะเบียน' : '🚑 รายการส่งต่อ'}
                 </button>
                 <button
-                  onClick={() => setShowReferModal(true)}
+                  onClick={() => {
+                    setEditingReferRecord(null);
+                    setShowReferModal(true);
+                  }}
                   className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg transition shadow"
                 >
                   + บันทึกส่งต่อ
@@ -434,7 +464,15 @@ export default function App() {
               </div>
             </div>
             {referViewMode === 'list' ? (
-              <ReferList records={referRecords} onRefresh={fetchReferRecords} />
+              <ReferList
+                records={referRecords}
+                currentUser={currentUser}
+                onRefresh={fetchReferRecords}
+                onEdit={(record) => {
+                  setEditingReferRecord(record);
+                  setShowReferModal(true);
+                }}
+              />
             ) : (
               <ReferReport records={referRecords} />
             )}
@@ -442,32 +480,38 @@ export default function App() {
         )}
       </main>
 
-      {/* --- ส่วน MODALS (ฟอร์มบันทึกข้อมูล) --- */}
+      {/* ================= MODALS (ฟอร์มบันทึก / แก้ไข) ================= */}
 
-      {/* 1. Modal บันทึกการเยี่ยมบ้าน (อัปเดต state ทันทีเมื่อกดยืนยัน) */}
+      {/* 1. Modal เยี่ยมบ้าน */}
       {showHomeVisitModal && (
         <HomeVisitModal
+          editingRecord={editingVisitRecord}
           currentUser={currentUser}
-          onClose={() => setShowHomeVisitModal(false)}
-          onSaved={(newVisit) => {
+          onClose={() => {
             setShowHomeVisitModal(false);
-            if (newVisit) {
-              setHomeVisits((prev) => [newVisit, ...prev]);
-            }
+            setEditingVisitRecord(null);
+          }}
+          onSaved={(savedRecord) => {
+            setShowHomeVisitModal(false);
+            setEditingVisitRecord(null);
             fetchHomeVisits();
           }}
         />
       )}
 
-      {/* 2. Modal บันทึกเฝ้าระวังโรค */}
+      {/* 2. Modal เฝ้าระวังโรค */}
       {showSurveillanceModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xl">
             <SurveillanceForm
-              patient={selectedPatient}
-              onClose={() => setShowSurveillanceModal(false)}
+              editingRecord={editingSurveillanceRecord}
+              onClose={() => {
+                setShowSurveillanceModal(false);
+                setEditingSurveillanceRecord(null);
+              }}
               onSaved={() => {
                 setShowSurveillanceModal(false);
+                setEditingSurveillanceRecord(null);
                 fetchSurveillanceCases();
               }}
             />
@@ -475,14 +519,19 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. Modal บันทึกวางแผนครอบครัว */}
+      {/* 3. Modal วางแผนครอบครัว */}
       {showFPModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xl">
             <FamilyPlanningForm
-              onClose={() => setShowFPModal(false)}
+              editingRecord={editingFpRecord}
+              onClose={() => {
+                setShowFPModal(false);
+                setEditingFpRecord(null);
+              }}
               onSaved={() => {
                 setShowFPModal(false);
+                setEditingFpRecord(null);
                 fetchFamilyPlanningRecords();
               }}
             />
@@ -490,14 +539,20 @@ export default function App() {
         </div>
       )}
 
-      {/* 4. Modal บันทึกส่งต่อผู้ป่วย */}
+      {/* 4. Modal ส่งต่อผู้ป่วย (Refer) */}
       {showReferModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-2xl">
             <ReferForm
-              onClose={() => setShowReferModal(false)}
+              editingRecord={editingReferRecord}
+              currentUser={currentUser}
+              onClose={() => {
+                setShowReferModal(false);
+                setEditingReferRecord(null);
+              }}
               onSaved={() => {
                 setShowReferModal(false);
+                setEditingReferRecord(null);
                 fetchReferRecords();
               }}
             />

@@ -1,265 +1,214 @@
-import React, { useState } from 'react';
-import { db } from '../../lib/db';
+// src/components/surveillance/SurveillanceForm.jsx
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { db } from '../../lib/db';
 
-const DISEASE_OPTIONS = [
-  { value: 'dengue', label: 'ไข้เลือดออก (Dengue)' },
-  { value: 'covid19', label: 'COVID-19' },
-  { value: 'influenza', label: 'ไข้หวัดใหญ่' },
-  { value: 'hfm', label: 'โรคมือเท้าปาก (HFM)' },
-  { value: 'diarrhea', label: 'อุจจาระร่วงเฉียบพลัน' },
-  { value: 'chikungunya', label: 'ไข้ปวดข้อยุงลาย' },
-  { value: 'other', label: 'โรคติดต่ออื่นๆ' }
-];
-
-export default function SurveillanceForm({ patient, onSaved, onClose }) {
+export default function SurveillanceForm({ editingRecord, patient, onClose, onSaved }) {
   const [formData, setFormData] = useState({
-    disease: 'dengue',
-    disease_other: '',
+    patient_name: '',
+    cid: '',
+    age: '',
+    village_no: '1',
+    disease_code: 'DENGUE',
+    disease_name: 'โรคไข้เลือดออก (DHF)',
     onset_date: new Date().toISOString().split('T')[0],
-    village_no: patient?.village_no || 1,
-    status: 'suspected',
-    latitude: '',
-    longitude: '',
+    diagnosis_date: new Date().toISOString().split('T')[0],
+    investigation_status: 'รอสอบสวนโรค',
     fogging_done: false,
-    temephos_distributed: false,
-    notes: ''
+    larvae_survey_done: false,
+    remarks: ''
   });
 
-  const [locating, setLocating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // ดึงพิกัด GPS อัตโนมัติ
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) {
-      alert('อุปกรณ์ไม่รองรับ GPS');
-      return;
+  useEffect(() => {
+    if (editingRecord) {
+      setFormData({
+        patient_name: editingRecord.patient_name || '',
+        cid: editingRecord.cid || '',
+        age: editingRecord.age || '',
+        village_no: String(editingRecord.village_no || '1'),
+        disease_code: editingRecord.disease_code || 'DENGUE',
+        disease_name: editingRecord.disease_name || 'โรคไข้เลือดออก (DHF)',
+        onset_date: editingRecord.onset_date || new Date().toISOString().split('T')[0],
+        diagnosis_date: editingRecord.diagnosis_date || new Date().toISOString().split('T')[0],
+        investigation_status: editingRecord.investigation_status || 'รอสอบสวนโรค',
+        fogging_done: !!editingRecord.fogging_done,
+        larvae_survey_done: !!editingRecord.larvae_survey_done,
+        remarks: editingRecord.remarks || ''
+      });
+    } else if (patient) {
+      setFormData(prev => ({
+        ...prev,
+        patient_name: patient.full_name || patient.patient_name || '',
+        cid: patient.cid || '',
+        village_no: String(patient.village_no || '1')
+      }));
     }
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setFormData((prev) => ({
-          ...prev,
-          latitude: pos.coords.latitude.toFixed(6),
-          longitude: pos.coords.longitude.toFixed(6)
-        }));
-        setLocating(false);
-      },
-      (err) => {
-        console.error(err);
-        alert('ไม่สามารถดึงตำแหน่งพิกัดได้ กรุณาเปิดการอนุญาตตำแหน่งบนอุปกรณ์');
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
+  }, [editingRecord, patient]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
+    setLoading(true);
 
-    const recordId = crypto.randomUUID();
+    const recordId = editingRecord ? editingRecord.id : crypto.randomUUID();
     const payload = {
       id: recordId,
-      patient_id: patient?.id || null,
+      ...formData,
       village_no: parseInt(formData.village_no, 10),
-      disease: formData.disease,
-      disease_other: formData.disease === 'other' ? formData.disease_other : null,
-      onset_date: formData.onset_date,
-      status: formData.status,
-      latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-      longitude: formData.longitude ? parseFloat(formData.longitude) : null,
-      control_measures: {
-        fogging_done: formData.fogging_done,
-        temephos_distributed: formData.temephos_distributed
-      },
-      notes: formData.notes
+      age: formData.age ? parseInt(formData.age, 10) : null,
+      updated_at: new Date().toISOString()
     };
 
+    if (!editingRecord) payload.created_at = new Date().toISOString();
+
     try {
-      if (navigator.onLine) {
-        const { error } = await supabase.from('disease_surveillance').insert([payload]);
-        if (error) throw error;
-        await db.diseaseSurveillance.put({ ...payload, sync_status: 'synced' });
+      if (editingRecord) {
+        if (navigator.onLine) {
+          await supabase.from('disease_surveillance').update(payload).eq('id', recordId);
+        }
+        if (db.diseaseSurveillance) {
+          await db.diseaseSurveillance.put({ ...payload, sync_status: 'synced' });
+        }
+        alert('แก้ไขข้อมูลเฝ้าระวังโรคเรียบร้อย');
       } else {
-        await db.diseaseSurveillance.put({ ...payload, sync_status: 'pending' });
-        await db.syncQueue.add({
-          table_name: 'disease_surveillance',
-          action: 'INSERT',
-          payload: payload,
-          created_at: new Date().toISOString()
-        });
+        if (navigator.onLine) {
+          await supabase.from('disease_surveillance').insert([payload]);
+        }
+        if (db.diseaseSurveillance) {
+          await db.diseaseSurveillance.put({ ...payload, sync_status: 'synced' });
+        }
+        alert('บันทึกเคสเฝ้าระวังโรคเรียบร้อย');
       }
 
-      alert('บันทึกข้อมูลเฝ้าระวังโรคสำเร็จ' + (!navigator.onLine ? ' (ออฟไลน์: บันทึกลงคิวซิงก์แล้ว)' : ''));
-      if (onSaved) onSaved();
+      if (onSaved) onSaved(payload);
+      if (onClose) onClose();
     } catch (err) {
-      console.error(err);
-      alert('เกิดข้อผิดพลาดในการบันทึก: ' + err.message);
+      alert('บันทึกไม่สำเร็จ: ' + err.message);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-xl w-full mx-auto font-sans">
-      <div className="flex justify-between items-start border-b pb-3 mb-4">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">แบบบันทึกงานเฝ้าระวังโรคติดต่อ</h2>
-          <p className="text-sm text-gray-500">
-            ผู้ป่วย: <span className="font-semibold text-emerald-700">{patient?.full_name || 'ไม่ระบุชื่อ'}</span> {patient?.cid && `(CID: ${patient.cid})`}
-          </p>
-        </div>
-        {onClose && (
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">
-            &times;
-          </button>
-        )}
+    <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-xl w-full font-sans">
+      <div className="flex justify-between items-center border-b pb-3 mb-4">
+        <h3 className="font-bold text-slate-800 text-base">
+          🚨 {editingRecord ? 'แก้ไขข้อมูลเคสเฝ้าระวังโรค' : 'บันทึกเคสเฝ้าระวังโรคติดต่อ (506)'}
+        </h3>
+        <button onClick={onClose} className="text-2xl text-slate-400 hover:text-slate-600">&times;</button>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">กลุ่มโรค</label>
+            <label className="block font-semibold mb-1">ชื่อ - สกุล ผู้ป่วย *</label>
+            <input
+              type="text"
+              required
+              value={formData.patient_name}
+              onChange={(e) => setFormData({ ...formData, patient_name: e.target.value })}
+              className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">เลขประจำตัวประชาชน (CID)</label>
+            <input
+              type="text"
+              maxLength="13"
+              value={formData.cid}
+              onChange={(e) => setFormData({ ...formData, cid: e.target.value })}
+              className="w-full border rounded-xl p-2.5 font-mono outline-none"
+            />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">โรคติดต่อที่เฝ้าระวัง</label>
             <select
-              value={formData.disease}
-              onChange={(e) => setFormData({ ...formData, disease: e.target.value })}
-              className="w-full border rounded-lg p-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+              value={formData.disease_name}
+              onChange={(e) => setFormData({ ...formData, disease_name: e.target.value })}
+              className="w-full border rounded-xl p-2.5 outline-none"
             >
-              {DISEASE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <option value="โรคไข้เลือดออก (DHF)">โรคไข้เลือดออก (DHF)</option>
+              <option value="โรคอุจจาระร่วงเฉียบพลัน (Acute Diarrhea)">โรคอุจจาระร่วงเฉียบพลัน (Acute Diarrhea)</option>
+              <option value="โรคมือเท้าปาก (HFMD)">โรคมือเท้าปาก (HFMD)</option>
+              <option value="โรคไข้หวัดใหญ่ (Influenza)">โรคไข้หวัดใหญ่ (Influenza)</option>
+              <option value="โรคโควิด-19 (COVID-19)">โรคโควิด-19 (COVID-19)</option>
+              <option value="โรคสครับไทฟัส (Scrub typhus)">โรคสครับไทฟัส (Scrub typhus)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">หมู่ที่ (ต.วังตะเคียน)</label>
+            <select
+              value={formData.village_no}
+              onChange={(e) => setFormData({ ...formData, village_no: e.target.value })}
+              className="w-full border rounded-xl p-2.5 outline-none"
+            >
+              {Array.from({ length: 17 }, (_, i) => i + 1).map((v) => (
+                <option key={v} value={v}>หมู่ {v}</option>
               ))}
             </select>
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">วันที่เริ่มมีอาการ</label>
+            <label className="block font-semibold mb-1">วันที่เริ่มมีอาการ</label>
             <input
               type="date"
               value={formData.onset_date}
               onChange={(e) => setFormData({ ...formData, onset_date: e.target.value })}
-              className="w-full border rounded-lg p-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-              required
+              className="w-full border rounded-xl p-2.5 outline-none"
             />
           </div>
-        </div>
-
-        {formData.disease === 'other' && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">ระบุชื่อโรค</label>
-            <input
-              type="text"
-              placeholder="เช่น โรคสุกใส, ไข้อีดำอีแดง"
-              value={formData.disease_other}
-              onChange={(e) => setFormData({ ...formData, disease_other: e.target.value })}
-              className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-              required
-            />
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">หมู่ที่ (ต.วังตะเคียน)</label>
+            <label className="block font-semibold mb-1">สถานะการสอบสวนโรค</label>
             <select
-              value={formData.village_no}
-              onChange={(e) => setFormData({ ...formData, village_no: e.target.value })}
-              className="w-full border rounded-lg p-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
+              value={formData.investigation_status}
+              onChange={(e) => setFormData({ ...formData, investigation_status: e.target.value })}
+              className="w-full border rounded-xl p-2.5 outline-none font-semibold text-amber-900"
             >
-              {Array.from({ length: 17 }, (_, i) => i + 1).map((m) => (
-                <option key={m} value={m}>หมู่ที่ {m}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">สถานะผู้ป่วย</label>
-            <select
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              className="w-full border rounded-lg p-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-            >
-              <option value="suspected">สงสัย / รอผลตรวจ</option>
-              <option value="confirmed">ยืนยันผลตรวจ</option>
-              <option value="under_control">อยู่ระหว่างควบคุมโรค</option>
-              <option value="recovered">หายแล้ว / สิ้นสุดติดตาม</option>
-              <option value="deceased">เสียชีวิต</option>
+              <option value="รอสอบสวนโรค">รอสอบสวนโรค</option>
+              <option value="กำลังสอบสวนโรค">กำลังสอบสวนโรค</option>
+              <option value="สอบสวนโรคแล้ว">สอบสวนโรคแล้ว</option>
             </select>
           </div>
         </div>
 
-        <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xs font-semibold text-gray-700">พิกัดจุดเกิดโรค (GPS Spot)</span>
-            <button
-              type="button"
-              onClick={handleGetLocation}
-              disabled={locating}
-              className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded transition"
-            >
-              {locating ? 'กำลังดึงพิกัด...' : '📍 ดึงพิกัดปัจจุบัน'}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="flex gap-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
+          <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-amber-900">
             <input
-              type="text"
-              placeholder="Latitude"
-              value={formData.latitude}
-              readOnly
-              className="border rounded p-1.5 bg-white text-gray-600 outline-none"
+              type="checkbox"
+              checked={formData.fogging_done}
+              onChange={(e) => setFormData({ ...formData, fogging_done: e.target.checked })}
+              className="w-4 h-4 rounded text-amber-600"
             />
+            พ่นหมอกควันแล้ว
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-amber-900">
             <input
-              type="text"
-              placeholder="Longitude"
-              value={formData.longitude}
-              readOnly
-              className="border rounded p-1.5 bg-white text-gray-600 outline-none"
+              type="checkbox"
+              checked={formData.larvae_survey_done}
+              onChange={(e) => setFormData({ ...formData, larvae_survey_done: e.target.checked })}
+              className="w-4 h-4 rounded text-amber-600"
             />
-          </div>
+            สำรวจลูกน้ำยุงลายแล้ว
+          </label>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">มาตรการควบคุมโรค</label>
-          <div className="flex gap-4 text-sm">
-            <label className="inline-flex items-center">
-              <input
-                type="checkbox"
-                checked={formData.fogging_done}
-                onChange={(e) => setFormData({ ...formData, fogging_done: e.target.checked })}
-                className="rounded text-emerald-600 mr-2"
-              />
-              พ่นหมอกควัน/ฆ่าเชื้อ
-            </label>
-            <label className="inline-flex items-center">
-              <input
-                type="checkbox"
-                checked={formData.temephos_distributed}
-                onChange={(e) => setFormData({ ...formData, temephos_distributed: e.target.checked })}
-                className="rounded text-emerald-600 mr-2"
-              />
-              แจกทรายอะเบท/เวชภัณฑ์
-            </label>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">บันทึกเพิ่มเติม</label>
+          <label className="block font-semibold mb-1">บันทึกเพิ่มเติม / ผลการควบคุมโรค</label>
           <textarea
             rows="2"
-            value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-            placeholder="ประวัติการเดินทาง หรือข้อมูลเพิ่มเติม..."
-            className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+            value={formData.remarks}
+            onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+            placeholder="รายละเอียดการลงพื้นที่..."
+            className="w-full border rounded-xl p-2.5 outline-none"
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-lg transition disabled:opacity-50"
-        >
-          {submitting ? 'กำลังบันทึก...' : 'บันทึกข้อมูลเฝ้าระวังโรค'}
-        </button>
+        <div className="flex gap-2 pt-2">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-100 rounded-xl font-medium">ยกเลิก</button>
+          <button type="submit" disabled={loading} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold shadow">
+            {loading ? 'กำลังบันทึก...' : editingRecord ? 'บันทึกการแก้ไข' : 'บันทึกเคส'}
+          </button>
+        </div>
       </form>
     </div>
   );

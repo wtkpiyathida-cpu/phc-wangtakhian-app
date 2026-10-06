@@ -1,9 +1,9 @@
 // src/components/homeVisit/HomeVisitModal.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { db } from '../../lib/db';
 
-export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
+export default function HomeVisitModal({ editingRecord, currentUser, onClose, onSaved }) {
   const [formData, setFormData] = useState({
     patient_name: '',
     cid: '',
@@ -25,7 +25,31 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
   const [loadingGps, setLoadingGps] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // คำนวณกลุ่มตามคะแนน ADL
+  useEffect(() => {
+    if (editingRecord) {
+      setFormData({
+        patient_name: editingRecord.patient_name || '',
+        cid: editingRecord.cid || '',
+        village_no: String(editingRecord.village_no || '1'),
+        house_no: editingRecord.house_no || '',
+        visit_date: editingRecord.visit_date || new Date().toISOString().split('T')[0],
+        bp_sys: editingRecord.bp_sys || '',
+        bp_dia: editingRecord.bp_dia || '',
+        pulse: editingRecord.pulse || '',
+        temp: editingRecord.temp || '',
+        adl_score: editingRecord.adl_score !== undefined ? editingRecord.adl_score : 20,
+        nursing_diagnosis: editingRecord.nursing_diagnosis || '',
+        nursing_care: editingRecord.nursing_care || '',
+        plan_next_visit: editingRecord.plan_next_visit || ''
+      });
+      const existingPhotos = [];
+      if (editingRecord.photo_1) existingPhotos.push(editingRecord.photo_1);
+      if (editingRecord.photo_2) existingPhotos.push(editingRecord.photo_2);
+      setPhotos(existingPhotos);
+      setGps({ lat: editingRecord.lat || null, lng: editingRecord.lng || null });
+    }
+  }, [editingRecord]);
+
   const getAdlGroup = (score) => {
     const s = parseInt(score, 10);
     if (s <= 4) return 'ติดเตียง (กลุ่ม 3: พึ่งพิงรุนแรง)';
@@ -71,7 +95,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
     e.preventDefault();
     setSubmitting(true);
 
-    const recordId = crypto.randomUUID();
+    const recordId = editingRecord ? editingRecord.id : crypto.randomUUID();
     const payload = {
       id: recordId,
       patient_name: formData.patient_name.trim(),
@@ -88,40 +112,43 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
       nursing_diagnosis: formData.nursing_diagnosis.trim() || null,
       nursing_care: formData.nursing_care.trim() || null,
       plan_next_visit: formData.plan_next_visit.trim() || null,
-      visitor_name: currentUser?.name || 'พยาบาลวิชาชีพ',
-      visitor_cid: currentUser?.cid || '',
+      visitor_name: editingRecord ? (editingRecord.visitor_name || currentUser?.name) : (currentUser?.name || 'พยาบาลวิชาชีพ'),
+      visitor_cid: editingRecord ? (editingRecord.visitor_cid || currentUser?.cid) : (currentUser?.cid || ''),
       photo_1: photos[0] || null,
       photo_2: photos[1] || null,
       lat: gps.lat,
       lng: gps.lng,
-      created_at: new Date().toISOString()
+      updated_at: new Date().toISOString()
     };
 
+    if (!editingRecord) {
+      payload.created_at = new Date().toISOString();
+    }
+
     try {
-      // 1. ส่งข้อมูลขึ้นหน้าจอทันที เพื่อให้แสดงผลโดยไม่ต้องรอโหลด
-      if (onSaved) {
-        onSaved(payload);
-      }
-
-      // 2. บันทึกลง IndexedDB บนเครื่องผู้ใช้งาน
-      if (db.cachedVisits) {
-        await db.cachedVisits.put({ ...payload, sync_status: navigator.onLine ? 'synced' : 'pending' });
-      }
-
-      // 3. ซิงก์ขึ้น Supabase หากออนไลน์
-      if (navigator.onLine) {
-        const { error } = await supabase.from('patient_visits').insert([payload]);
-        if (error) {
-          console.error('Supabase insert warning:', error.message);
+      if (editingRecord) {
+        if (navigator.onLine) {
+          await supabase.from('patient_visits').update(payload).eq('id', recordId);
         }
+        if (db.cachedVisits) {
+          await db.cachedVisits.put({ ...payload, sync_status: navigator.onLine ? 'synced' : 'pending' });
+        }
+        alert('แก้ไขข้อมูลการเยี่ยมบ้านเรียบร้อย');
+      } else {
+        if (navigator.onLine) {
+          await supabase.from('patient_visits').insert([payload]);
+        }
+        if (db.cachedVisits) {
+          await db.cachedVisits.put({ ...payload, sync_status: navigator.onLine ? 'synced' : 'pending' });
+        }
+        alert('บันทึกข้อมูลการเยี่ยมบ้านเรียบร้อย');
       }
 
-      alert('บันทึกข้อมูลการเยี่ยมบ้านเรียบร้อยแล้ว');
+      if (onSaved) onSaved(payload);
       if (onClose) onClose();
     } catch (err) {
-      console.error('Save error:', err);
-      alert('บันทึกข้อมูลเรียบร้อย (บันทึกระดับเครื่อง): ' + err.message);
-      if (onClose) onClose();
+      console.error(err);
+      alert('เกิดข้อผิดพลาดในการบันทึก: ' + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -133,7 +160,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
         <div className="flex justify-between items-center border-b pb-3 mb-4 sticky top-0 bg-white z-10">
           <div>
             <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-              <span>🏠</span> บันทึกการเยี่ยมบ้านและประเมินภาวะพึ่งพิง
+              <span>🏠</span> {editingRecord ? 'แก้ไขข้อมูลการเยี่ยมบ้าน' : 'บันทึกการเยี่ยมบ้านและประเมินภาวะพึ่งพิง'}
             </h3>
             <p className="text-xs text-emerald-800 font-medium">
               ผู้ตรวจ: {currentUser?.name} ({currentUser?.position})
@@ -145,7 +172,6 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* ข้อมูลผู้ป่วย */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <span className="font-bold text-slate-800 text-xs block">1. ข้อมูลผู้ป่วยและสถานที่</span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -199,7 +225,6 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* สัญญาณชีพและคะแนน ADL (ไม่มี DTX แล้ว) */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
             <span className="font-bold text-slate-800 text-xs block">2. สัญญาณชีพ & การประเมิน ADL</span>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -267,7 +292,6 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* ปัญหาและการพยาบาล */}
           <div className="space-y-3">
             <div>
               <label className="block font-semibold text-slate-700 mb-1">ปัญหาทางการพยาบาล / การวินิจฉัย</label>
@@ -275,7 +299,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                 rows="2"
                 value={formData.nursing_diagnosis}
                 onChange={(e) => setFormData({ ...formData, nursing_diagnosis: e.target.value })}
-                placeholder="เช่น เสี่ยงต่อการเกิดแผลกดทับ, ควบคุมความดันโลหิตไม่สม่ำเสมอ..."
+                placeholder="เช่น เสี่ยงต่อการเกิดแผลกดทับ..."
                 className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
@@ -286,12 +310,11 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
                 rows="2"
                 value={formData.nursing_care}
                 onChange={(e) => setFormData({ ...formData, nursing_care: e.target.value })}
-                placeholder="เช่น ทำแผลกดทับด้วยวิธีปลอดเชื้อ, แนะนำญาติพลิกตัวทุก 2 ชม., ปรับการจัดยา..."
+                placeholder="เช่น ทำแผลกดทับ แนะนำพลิกตัวทุก 2 ชั่วโมง..."
                 className="w-full border rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
-            {/* GPS และภาพถ่าย */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
               <div className="p-3 bg-slate-50 border rounded-2xl flex justify-between items-center">
                 <div>
@@ -343,7 +366,7 @@ export default function HomeVisitModal({ currentUser, onClose, onSaved }) {
               disabled={submitting}
               className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white py-3 rounded-xl font-medium shadow"
             >
-              {submitting ? 'กำลังบันทึกข้อมูล...' : 'บันทึกการเยี่ยมบ้าน'}
+              {submitting ? 'กำลังบันทึกข้อมูล...' : editingRecord ? 'บันทึกการแก้ไข' : 'บันทึกการเยี่ยมบ้าน'}
             </button>
           </div>
         </form>

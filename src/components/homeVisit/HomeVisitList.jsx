@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import HomeVisitReport from './HomeVisitReport';
 
-export default function HomeVisitList({ visits, onNewVisit }) {
+export default function HomeVisitList({ visits, onNewVisit, onEdit }) {
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'report'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVillage, setSelectedVillage] = useState('all');
@@ -24,7 +24,7 @@ export default function HomeVisitList({ visits, onNewVisit }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* ปุ่มสลับโหมด: ทะเบียนรายการ vs รายงานสรุปตามช่วงเวลา */}
+          {/* ปุ่มสลับโหมด: รายการเยี่ยมบ้าน vs ทะเบียนรายงานตามช่วงเวลา */}
           <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 text-xs">
             <button
               onClick={() => setViewMode('list')}
@@ -79,7 +79,7 @@ export default function HomeVisitList({ visits, onNewVisit }) {
             </select>
           </div>
 
-          {/* รายการแสดงผล */}
+          {/* รายการแสดงผลการ์ดผู้ป่วย */}
           {filteredVisits.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
               <span className="text-4xl block mb-2">📋</span>
@@ -116,14 +116,27 @@ export default function HomeVisitList({ visits, onNewVisit }) {
                     )}
                   </div>
 
+                  {/* ส่วนล่างของการ์ด: แสดงวันผู้ตรวจ พร้อมปุ่ม "✏️ แก้ไข" และ "🖨️ พิมพ์ใบประเมิน" */}
                   <div className="mt-3 pt-2.5 border-t border-slate-100 flex justify-between items-center text-[11px]">
-                    <span className="text-slate-400">วันที่: {v.visit_date} โดย {v.visitor_name}</span>
-                    <button
-                      onClick={() => setSelectedForPrint(v)}
-                      className="text-emerald-700 hover:text-emerald-800 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1"
-                    >
-                      <span>🖨️</span> พิมพ์ใบประเมิน
-                    </button>
+                    <span className="text-slate-400">วันที่: {v.visit_date} โดย {v.visitor_name || '-'}</span>
+                    <div className="flex items-center gap-1.5">
+                      {/* ปุ่มแก้ไขข้อมูลเคสเยี่ยมบ้าน */}
+                      <button
+                        onClick={() => onEdit(v)}
+                        className="text-amber-800 hover:text-amber-900 font-semibold bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 transition"
+                        title="แก้ไขข้อมูล"
+                      >
+                        ✏️ แก้ไข
+                      </button>
+
+                      {/* ปุ่มพิมพ์ใบประเมิน A4 */}
+                      <button
+                        onClick={() => setSelectedForPrint(v)}
+                        className="text-emerald-700 hover:text-emerald-800 font-bold bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1 transition"
+                      >
+                        <span>🖨️</span> พิมพ์ใบประเมิน
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -138,7 +151,7 @@ export default function HomeVisitList({ visits, onNewVisit }) {
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-xl w-full max-h-[92vh] overflow-y-auto font-sans">
             <div className="flex justify-between items-center border-b pb-3 mb-4 print:hidden">
               <span className="font-bold text-slate-800">พรีวิวแบบฟอร์มบันทึกการเยี่ยมบ้าน</span>
-              <button onClick={() => setSelectedForPrint(null)} className="text-2xl text-slate-400">&times;</button>
+              <button onClick={() => setSelectedForPrint(null)} className="text-2xl text-slate-400 hover:text-slate-600">&times;</button>
             </div>
 
             <div className="space-y-4 text-xs">
@@ -158,7 +171,7 @@ export default function HomeVisitList({ visits, onNewVisit }) {
                 <div className="font-bold text-slate-800">ผลการตรวจสัญญาณชีพและการประเมิน ADL:</div>
                 <div>• ความดันโลหิต (BP): {selectedForPrint.bp_sys || '-'}/{selectedForPrint.bp_dia || '-'} mmHg</div>
                 <div>• ชีพจร (PR): {selectedForPrint.pulse || '-'} bpm | อุณหภูมิ: {selectedForPrint.temp || '-'} °C</div>
-                <div>• คะแนน Barthel ADL Index: <strong>{selectedForPrint.adl_score} / 20 ({selectedForPrint.adl_group})</strong></div>
+                <div>• คะแนน Barthel ADL Index: <strong>{selectedForPrint.adl_score} / 20 ({selectedForPrint.adl_group || '-'})</strong></div>
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl border space-y-1">
@@ -177,12 +190,12 @@ export default function HomeVisitList({ visits, onNewVisit }) {
               <div className="pt-6 flex justify-between items-center text-center">
                 <div>
                   <p>ลงชื่อ....................................................</p>
-                  <p className="mt-1">({selectedForPrint.visitor_name})</p>
+                  <p className="mt-1">({selectedForPrint.visitor_name || '....................................................'})</p>
                   <p className="text-[10px] text-slate-500">พยาบาลวิชาชีพผู้บันทึก</p>
                 </div>
                 <div className="flex gap-2 print:hidden">
-                  <button onClick={() => setSelectedForPrint(null)} className="px-3 py-2 bg-slate-100 rounded-xl">ปิด</button>
-                  <button onClick={() => window.print()} className="px-4 py-2 bg-emerald-700 text-white rounded-xl font-bold shadow">🖨️ พิมพ์เอกสาร</button>
+                  <button onClick={() => setSelectedForPrint(null)} className="px-3 py-2 bg-slate-100 rounded-xl font-medium">ปิด</button>
+                  <button onClick={() => window.print()} className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold shadow">🖨️ พิมพ์เอกสาร</button>
                 </div>
               </div>
             </div>
